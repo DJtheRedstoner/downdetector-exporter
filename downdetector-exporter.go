@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goccy/go-yaml"
-
 	"github.com/go-kit/kit/log"
 	kitlog "github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
@@ -26,8 +24,6 @@ import (
 )
 
 const (
-	// a token can live at most 3600 seconds before it needs to be refreshed
-	tokenGraceSeconds = 300 // Seconds before token EOL when a new token must be fetched
 	// seconds before next loop is started
 	minSleepSeconds = 60
 	baseURL         = "https://downdetectorapi.com/v2"
@@ -40,10 +36,7 @@ var (
 	fieldsToReturn       = []string{"id", "name", "slug", "baseline_current", "country_iso", "stats_24", "stats_60", "status"}
 	fieldsToReturnSearch = []string{"id", "name", "slug", "country_iso"}
 
-	token       Token
-	credentials BasicAuth
-	username    string
-	password    string
+	token string
 
 	httpClient *http.Client
 
@@ -64,24 +57,6 @@ var (
 func init() {
 	// add the lastUpdate metrics to prometheus
 	prometheus.MustRegister(lastUpdate)
-}
-
-// BasicAuth contains username and string after reading them in from Yaml file
-type BasicAuth struct {
-	UserName string `json:"username"`
-	Password string `json:"password"`
-}
-
-// Token contains token, expiration at issuing time, type and, later, the time of issuing
-type Token struct {
-	// Access containing access token (type Bearer normally)
-	Access string `json:"access_token"`
-	// ExpiresIn usually contains 3600 (seconds)
-	ExpiresIn int `json:"expires_in"`
-	// Type contains the token type (Bearer)
-	Type string `json:"token_type"`
-	// RefreshTime must programmatically be set after a token has been successfully fetched
-	RefreshTime time.Time
 }
 
 // CompanySet contains returned data per Company
@@ -107,33 +82,6 @@ type CompanySet struct {
 	NumStatus int `json:"-"`
 }
 
-func getCredentials(credentialsFile string) {
-
-	// given username and password takes precedence over credentialsFile
-	if username != "" && password != "" {
-		credentials.UserName = username
-		credentials.Password = password
-	} else {
-		osFile, err := os.Open(credentialsFile)
-		if err != nil {
-			// return if we weren't successful - we have tokenGraceSeconds to retry
-			level.Error(lg).Log("msg", fmt.Sprintf("Couldn't read credentials file: %s", err.Error()))
-			os.Exit(2)
-		}
-		//fmt.Println(dat)
-		err = yaml.NewDecoder(osFile).Decode(&credentials)
-		if err != nil || credentials.Password == "" || credentials.UserName == "" {
-			errorText := "Username/Password not set"
-			if err != nil {
-				//errorText = err.Error()
-			}
-			level.Error(lg).Log("msg", fmt.Sprintf("Couldn't parse credentials file: %s", errorText))
-			level.Error(lg).Log("msg", fmt.Sprintf("YAML file needs to contain userName and password fields"))
-			os.Exit(2)
-		}
-	}
-}
-
 // trace prints out information about the current function called
 func trace() string {
 	pc, file, line, ok := runtime.Caller(1)
@@ -149,7 +97,6 @@ func main() {
 
 	// Destination variables of command line parser
 	var listenAddress string
-	var credentialsFile string
 	var metricsPath string
 	var logLevel string
 	var companyIDs string
@@ -189,7 +136,7 @@ func main() {
 			},
 		},
 		Commands:  nil,
-		HideHelp:  true,
+		HideHelp:  false,
 		ArgsUsage: " ",
 		Name:      "downdetector-exporter",
 		Usage:     "report metrics of downdetector api",
@@ -202,27 +149,12 @@ func main() {
 				EnvVars:     []string{"COMPANY_IDS"},
 			},
 			&cli.StringFlag{
-				Name:        "credentials_file",
-				Aliases:     []string{"c"},
-				Usage:       "file containing credentials for downdetector. Credentials file is in YAML format and contains two fields, username and password. Alternatively give username and password, they win over credentials file.",
-				Destination: &credentialsFile,
-				EnvVars:     []string{"CREDENTIALS_FILE"},
-			},
-			&cli.StringFlag{
-				Name:        "username",
+				Name:        "token",
 				Value:       "",
-				Aliases:     []string{"u"},
-				Usage:       "username, wins over credentials file",
-				Destination: &username,
-				EnvVars:     []string{"DD_USERNAME"},
-			},
-			&cli.StringFlag{
-				Name:        "password",
-				Value:       "",
-				Aliases:     []string{"p"},
-				Usage:       "password, wins over credentials file",
-				Destination: &password,
-				EnvVars:     []string{"DD_PASSWORD"},
+				Aliases:     []string{"t"},
+				Usage:       "authentication token",
+				Destination: &token,
+				EnvVars:     []string{"DD_TOKEN"},
 			},
 			&cli.StringFlag{
 				Name:        "listen_address",
@@ -258,16 +190,13 @@ func main() {
 		},
 		Action: func(c *cli.Context) error {
 
-			if credentialsFile == "" {
-				if username == "" || password == "" {
-					level.Error(lg).Log("msg", "Either credentials_file or username and password need to be set!")
-
-					os.Exit(2)
-				}
-			}
-
 			if companyIDs == "" && searchString == "" {
 				level.Error(lg).Log("msg", "Either company_ids or a search string need to be set!")
+				os.Exit(2)
+			}
+
+			if token == "" {
+				level.Error(lg).Log("msg", "A token must be specified!")
 				os.Exit(2)
 			}
 
@@ -286,7 +215,6 @@ func main() {
 			}
 
 			level.Debug(lg).Log("msg", fmt.Sprintf("listenAddress: %s", listenAddress))
-			level.Debug(lg).Log("msg", fmt.Sprintf("credentialsFile: %s", credentialsFile))
 			level.Debug(lg).Log("msg", fmt.Sprintf("metricsPath: %s", metricsPath))
 			level.Debug(lg).Log("msg", fmt.Sprintf("companyIDs: %v", companyIDs))
 
@@ -317,9 +245,6 @@ func main() {
 			// notify systemd that we're ready
 			daemon.SdNotify(false, daemon.SdNotifyReady)
 
-			// read in credentials from Yaml file or username/password variables
-			getCredentials(credentialsFile)
-
 			// TODO: Proxy URL instead of ""
 			httpClient = getHTTPClient("")
 
@@ -341,19 +266,12 @@ func main() {
 
 	// Start the app
 	err := app.Run(os.Args)
-	level.Error(lg).Log("msg", err.Error())
+	if err != nil {
+		level.Error(lg).Log("msg", err.Error())
+	}
 }
 
 func workHorse(companyIDs string, searchString string) {
-
-	// refresh token if only tokenGraceSeconds are left before it expires
-	if token.Access == "" || int(time.Now().Sub(token.RefreshTime).Seconds()) > token.ExpiresIn-tokenGraceSeconds {
-		level.Debug(lg).Log("msg", "refreshing token")
-		initToken()
-	} else {
-		level.Debug(lg).Log("msg", fmt.Sprintf("Seconds before a new token must be fetched: %d", (token.ExpiresIn-tokenGraceSeconds)-int(time.Now().Sub(token.RefreshTime).Seconds())))
-	}
-
 	getMetrics(companyIDs, searchString)
 }
 
@@ -391,50 +309,6 @@ func getHTTPClient(proxyURLStr string) *http.Client {
 	return client
 }
 
-func initToken() {
-
-	// create the token refresh request
-	url := baseURL + "/tokens?grant_type=client_credentials"
-	req, err := http.NewRequest("POST", url, nil)
-	req.SetBasicAuth(credentials.UserName, credentials.Password)
-	if err != nil {
-		// return if we weren't successful - we have tokenGraceSeconds to retry
-		level.Warn(lg).Log("msg", fmt.Sprintf("Couldn't apply Basic Auth: %s", err.Error()))
-		return
-	}
-	// send the token refresh request
-	res, err := httpClient.Do(req)
-	if res.StatusCode != 200 {
-		// return if we weren't successful - we have tokenGraceSeconds to retry
-		body, _ := io.ReadAll(res.Body)
-		level.Warn(lg).Log("msg", fmt.Sprintf("Error response code: %d - %s", res.StatusCode, body))
-		return
-	}
-	defer res.Body.Close()
-
-	// read body from response
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		// return if we weren't successful - we have tokenGraceSeconds to retry
-		level.Warn(lg).Log("msg", fmt.Sprintf("Couldn't read in body: %s", err.Error()))
-		return
-	}
-
-	// unmarshal body content into token struct
-	err = json.Unmarshal(body, &token)
-	if err != nil {
-		level.Warn(lg).Log("msg", fmt.Sprintf("Couldn't unmarshal json: %s", err.Error()))
-		return
-	}
-
-	// Mark we have refreshed token right now
-	token.RefreshTime = time.Now()
-	level.Debug(lg).Log("msg", fmt.Sprintf("Token Type: %s", token.Type))
-	level.Debug(lg).Log("msg", fmt.Sprintf("Expires in: %d", token.ExpiresIn))
-	level.Debug(lg).Log("msg", fmt.Sprintf("Token Refresh Time: %s", token.RefreshTime))
-
-}
-
 func getMetrics(companyIDs string, searchString string) {
 
 	var url string
@@ -447,7 +321,7 @@ func getMetrics(companyIDs string, searchString string) {
 	// curl --request GET -H "Authorization: Bearer $TOKEN" --url 'https://downdetectorapi.com/v2/companies/search?name=mail.com&fields=url%2Cbaseline%2Csite_id%2Cstatus%2Ccountry_iso%2Cname%2Cslug' | jq .
 
 	req, err := http.NewRequest("GET", url, nil)
-	req.Header.Add("Authorization", "Bearer "+token.Access)
+	req.Header.Add("Authorization", "Bearer "+token)
 	if err != nil {
 		level.Warn(lg).Log("msg", fmt.Sprintf("Couldn't apply authorization header: %s", err.Error()))
 		return
@@ -494,7 +368,7 @@ func getMetrics(companyIDs string, searchString string) {
 			default:
 				companySet.NumStatus = -1
 			}
-			// get last value from Stats24 array			
+			// get last value from Stats24 array
 			companySet.Stats15 = companySet.IgnoreStats24[len(companySet.IgnoreStats24)-1]
 
 			// Debugging output
