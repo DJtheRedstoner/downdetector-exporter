@@ -20,5 +20,5 @@ jobs:
       - name: 'Build Inventory Image'
         run: |
           repo=$(echo $GITHUB_REPOSITORY_OWNER | tr '[:upper:]' '[:lower:]')
-          docker build . --tag ghcr.io/$c/downdetector-exporter:latest
-          docker push ghcr.io/$GITHUB_REPOSITORY_OWNER/downdetector-exporter:latest
+          docker build . --tag ghcr.io/$repo/downdetector-exporter:latest
+          docker push ghcr.io/$repo/downdetector-exporter:latest
