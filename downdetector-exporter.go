@@ -72,8 +72,6 @@ type CompanySet struct {
 	LabelID      int    `json:"id"`
 	// BaseLineCurrent is a value generated over the last 24 hours, shows the normal baseline value of a service
 	BaselineCurrent int `json:"baseline_current"`
-	// Stats60 is the current metrics of mentions
-	Stats60 int `json:"stats_60"`
 	// IgnoreStats24 is the statistics over the last 24h in 15 minute buckets.
 	IgnoreStats24 []int `json:"stats_24"`
 	// Stats15 is the number of reports over the last 15
@@ -382,7 +380,6 @@ func getMetrics(companyIDs string, searchString string) {
 			level.Debug(lg).Log("msg", fmt.Sprintf("Status:           %s", companySet.IgnoreStatus))
 			level.Debug(lg).Log("msg", fmt.Sprintf("===== Metrics ====="))
 			level.Debug(lg).Log("msg", fmt.Sprintf("Current Baseline: %d", companySet.BaselineCurrent))
-			level.Debug(lg).Log("msg", fmt.Sprintf("Stats60:          %d", companySet.Stats60))
 			level.Debug(lg).Log("msg", fmt.Sprintf("Stats15:          %d", companySet.Stats15))
 			level.Debug(lg).Log("msg", fmt.Sprintf("Status:           %d", companySet.NumStatus))
 
