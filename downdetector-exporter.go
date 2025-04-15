@@ -13,9 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	kitlog "github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/urfave/cli/v2"
 
 	"github.com/coreos/go-systemd/daemon"
@@ -30,7 +29,7 @@ const (
 )
 
 var (
-	lg = kitlog.NewLogfmtLogger(os.Stdout)
+	lg = log.NewLogfmtLogger(os.Stdout)
 
 	// fields for metrics request. If expanded, struct CompanySet needs to be expanded accordingly
 	fieldsToReturn       = []string{"id", "name", "slug", "baseline_current", "country_iso", "stats_24", "stats_60", "status"}
@@ -100,30 +99,6 @@ func main() {
 	var companyIDs string
 	var searchString string
 
-	// Override template
-	cli.AppHelpTemplate = `
-	NAME:
-	   {{.Name}} - {{.Usage}}
-
-	USAGE:
-	   {{.HelpName}} {{if .VisibleFlags}}[global options]{{end}}{{if .Commands}} command [command options]{{end}} {{if .ArgsUsage}}{{.ArgsUsage}}{{else}}[arguments...]{{end}}
-	   {{if len .Authors}}
-	AUTHOR:
-	   {{range .Authors}}{{ . }}{{end}}
-	   {{end}}{{if .Commands}}
-	COMMANDS:
-	{{range .Commands}}{{if not .HideHelp}}   {{join .Names ", "}}{{ "\t"}}{{.Usage}}{{ "\n" }}{{end}}{{end}}{{end}}{{if .VisibleFlags}}
-	GLOBAL OPTIONS:
-	   {{range .VisibleFlags}}{{.}}
-	   {{end}}{{end}}{{if .Copyright }}
-	COPYRIGHT:
-	   {{.Copyright}}
-	   {{end}}{{if .Version}}
-	VERSION:
-	   {{.Version}}
-	   {{end}}
-  `
-
 	// TODO: - value checking
 	// app is a command line parser
 	app := &cli.App{
@@ -134,7 +109,6 @@ func main() {
 			},
 		},
 		Commands:  nil,
-		HideHelp:  false,
 		ArgsUsage: " ",
 		Name:      "downdetector-exporter",
 		Usage:     "report metrics of downdetector api",
@@ -199,8 +173,8 @@ func main() {
 			}
 
 			// Debugging output
-			lg = kitlog.NewLogfmtLogger(os.Stdout)
-			lg = kitlog.With(lg, "ts", log.DefaultTimestamp, "caller", kitlog.DefaultCaller)
+			lg = log.NewLogfmtLogger(os.Stdout)
+			lg = log.With(lg, "ts", log.DefaultTimestamp, "caller", log.DefaultCaller)
 			switch logLevel {
 			case "DEBUG":
 				lg = level.NewFilter(lg, level.AllowDebug())
@@ -326,6 +300,10 @@ func getMetrics(companyIDs string, searchString string) {
 	}
 	// send the metrics request
 	res, err := httpClient.Do(req)
+	if err != nil {
+		level.Error(lg).Log("msg", fmt.Sprintf("Couldn't get metrics: %s", err.Error()))
+		return
+	}
 	if res.StatusCode != 200 {
 		// return if we weren't successful
 		body, _ := io.ReadAll(res.Body)
